@@ -61,11 +61,19 @@ try {
 # ------------------------------------------------------------
 Write-Step "安装依赖 (mcp-server/npm install)"
 Push-Location $serverDir
+# Relax EAP around native commands — npm/node may write deprecation warnings to
+# stderr which $EAP='Stop' would otherwise treat as terminating errors.
+$savedEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 try {
     & npm install --silent
-    if ($LASTEXITCODE -ne 0) { throw "npm install 失败" }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err2 "npm install 失败 (exit $LASTEXITCODE)"
+        exit 1
+    }
     Write-Ok "依赖安装完成"
 } finally {
+    $ErrorActionPreference = $savedEAP
     Pop-Location
 }
 

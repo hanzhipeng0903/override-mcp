@@ -49,28 +49,40 @@ $hasGit = $false
 try { & git --version *>$null; if ($LASTEXITCODE -eq 0) { $hasGit = $true } } catch {}
 
 if ($hasGit) {
-    if (Test-Path (Join-Path $InstallDir '.git')) {
-        Write-Host "    已存在 git 仓库，执行 git pull 更新..."
-        Push-Location $InstallDir
-        try {
-            & git fetch origin $Branch 2>&1 | Out-Null
-            & git reset --hard "origin/$Branch" 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "git reset 失败" }
-            Write-Ok "已更新到最新 $Branch"
-        } finally {
-            Pop-Location
+    # IMPORTANT: do NOT use "2>&1" with native exes on Windows PowerShell 5.1.
+    # Git writes progress messages ("Cloning into...") to stderr; with 2>&1 PS5.1
+    # wraps each line as a NativeCommandError, which $ErrorActionPreference='Stop'
+    # promotes to a terminating error — even though git itself succeeded.
+    # Strategy: temporarily relax EAP, run native command, check $LASTEXITCODE.
+    $savedEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if (Test-Path (Join-Path $InstallDir '.git')) {
+            Write-Host "    已存在 git 仓库，执行 git pull 更新..."
+            Push-Location $InstallDir
+            try {
+                & git fetch origin $Branch | Out-Null
+                if ($LASTEXITCODE -ne 0) { Write-Err2 "git fetch 失败"; exit 1 }
+                & git reset --hard "origin/$Branch" | Out-Null
+                if ($LASTEXITCODE -ne 0) { Write-Err2 "git reset 失败"; exit 1 }
+                Write-Ok "已更新到最新 $Branch"
+            } finally {
+                Pop-Location
+            }
+        } else {
+            if (Test-Path $InstallDir) {
+                Write-Warn2 "目录 $InstallDir 已存在但不是 git 仓库，备份后重新克隆"
+                $backupName = "$InstallDir.bak.$(Get-Date -Format 'yyyyMMddHHmmss')"
+                Rename-Item -Path $InstallDir -NewName $backupName
+                Write-Host "    旧目录 → $backupName"
+            }
+            Write-Host "    git clone https://github.com/$Repo.git ..."
+            & git clone --depth 1 --branch $Branch "https://github.com/$Repo.git" $InstallDir
+            if ($LASTEXITCODE -ne 0) { Write-Err2 "git clone 失败 (exit $LASTEXITCODE)"; exit 1 }
+            Write-Ok "已 clone 到 $InstallDir"
         }
-    } else {
-        if (Test-Path $InstallDir) {
-            Write-Warn2 "目录 $InstallDir 已存在但不是 git 仓库，备份后重新克隆"
-            $backupName = "$InstallDir.bak.$(Get-Date -Format 'yyyyMMddHHmmss')"
-            Rename-Item -Path $InstallDir -NewName $backupName
-            Write-Host "    旧目录 → $backupName"
-        }
-        Write-Host "    git clone https://github.com/$Repo.git ..."
-        & git clone --depth 1 --branch $Branch "https://github.com/$Repo.git" $InstallDir 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-Err2 "git clone 失败"; exit 1 }
-        Write-Ok "已 clone 到 $InstallDir"
+    } finally {
+        $ErrorActionPreference = $savedEAP
     }
 } else {
     Write-Warn2 "未检测到 git，改用 zip 下载（无法增量更新）"
