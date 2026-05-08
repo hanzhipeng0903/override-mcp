@@ -62,7 +62,8 @@ export function buildTools(bridge) {
         '⭐ START HERE when the user mentions "this page", "the current tab", "the page I\'m on", or doesn\'t specify a tab.',
         'Returns: the active tab (id, url, title, attached state), global enabled flag, rule count, and the most recent N requests SCOPED TO that tab.',
         'By default returns only API calls (XHR + Fetch) — the requests users almost always want to mock. Pass type:"all" or specific CDP types to broaden.',
-        'After calling this you usually have everything needed to: pick a request to mock, decide if you need to attach first, identify the right URL pattern.'
+        'IMPLICIT: this call auto-attaches the active tab if it isn\'t attached yet (user sees the yellow "debugging" banner — expected). So you don\'t need to call `attach` separately for the current tab.',
+        'If `recent` is empty after calling this, ask the user to refresh or interact with the page so traffic gets captured.'
       ].join(' '),
       inputSchema: z.object({
         n: z.number().int().min(1).max(50).default(10).describe('How many recent requests to include'),
@@ -85,7 +86,7 @@ export function buildTools(bridge) {
 
     {
       name: 'attach',
-      description: 'Start intercepting requests on a tab (triggers yellow "debugging" banner). If `tabId` is omitted, attaches to the active tab. Required before any `fulfill` / `passthrough_patch` / `block` rule can fire on that tab.',
+      description: 'Start intercepting requests on a tab (triggers yellow "debugging" banner). Usually you do NOT need to call this explicitly — `add_rule` and `active_context` auto-attach the active tab. Use `attach` only when you need to attach a SPECIFIC non-active tab (pass tabId from `list_tabs`).',
       inputSchema: z.object({
         tabId: z.number().int().optional().describe('Omit to use the active tab')
       }),
@@ -132,7 +133,8 @@ export function buildTools(bridge) {
     {
       name: 'add_rule',
       description: [
-        'Add an override rule.',
+        'Add an override rule. The rule takes effect immediately on the user\'s active tab — this call auto-attaches that tab if it isn\'t attached (user sees the yellow "debugging" banner).',
+        'After this returns, the user just needs to refresh or trigger a new request to see the override fire.',
         '',
         'Action types:',
         '  * `fulfill`        — return mock without hitting network (works even if real endpoint 404s or DNS fails)',

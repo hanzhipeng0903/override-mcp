@@ -265,6 +265,13 @@ async function resolveFilter(filter) {
 async function activeContext(n, type) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab) return { active: null, recent: [] };
+  // If the active tab isn't attached yet, attach it now so subsequent calls
+  // (and any add_rule the AI is about to issue) actually capture traffic.
+  // Skip non-http URLs — chrome.debugger can't attach to chrome:// pages.
+  if (!state.attachedTabs.has(tab.id) && /^https?:/.test(tab.url || '')) {
+    try { await attachTab(tab.id); }
+    catch (e) { log('active_context auto-attach failed:', e?.message); }
+  }
   const recent = state.recent
     .filter(r => r.tabId === tab.id)
     .filter(r => matchType(r.type, type))
@@ -372,8 +379,27 @@ async function addRule(rule) {
   const r = normalizeRule(rule);
   state.rules.push(r);
   await persistRules();
+  // Make the rule effective immediately: if the user's active tab isn't
+  // attached yet, attach it now so the rule fires without an extra step.
+  // chrome.debugger can't attach to chrome:// internal pages — silently skip
+  // those (the user can manually attach after navigating to a real page).
+  await ensureActiveTabAttached();
   await reconfigureAllAttached();
   return r;
+}
+
+async function ensureActiveTabAttached() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.id) return;
+    if (state.attachedTabs.has(tab.id)) return;
+    if (!/^https?:/.test(tab.url || '')) return; // skip chrome://, file://, etc.
+    await attachTab(tab.id);
+    sendEvent('auto_attached', { tabId: tab.id, url: tab.url });
+  } catch (e) {
+    // Don't block rule creation on attach failure — user can attach manually
+    log('auto-attach failed (rule still added):', e?.message);
+  }
 }
 
 async function updateRule(id, patch) {

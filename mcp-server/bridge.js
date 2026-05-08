@@ -29,42 +29,51 @@ export class ExtensionBridge {
   start() {
     return new Promise((resolve, reject) => {
       this.httpServer = http.createServer((req, res) => this._handleHttp(req, res));
-      this.wss = new WebSocketServer({ server: this.httpServer });
-      this.wss.on('connection', (ws) => {
-        // Replace any prior client (extension reload, etc.)
-        if (this.client && this.client.readyState === this.client.OPEN) {
-          try { this.client.close(); } catch {}
-        }
-        this.client = ws;
-        this.log('✓ extension connected');
-        if (this._noExtensionWarn) {
-          clearTimeout(this._noExtensionWarn);
-          this._noExtensionWarn = null;
-        }
-        ws.on('message', (data) => this._onMessage(data));
-        ws.on('close', () => {
-          if (this.client === ws) this.client = null;
-          this.log('extension disconnected');
-        });
-        ws.on('error', (e) => this.log('ws error:', e.message));
-      });
 
-      this.httpServer.once('error', (err) => {
+      // Critical: install error handler BEFORE listen, and BEFORE attaching the
+      // WebSocketServer. Otherwise EADDRINUSE propagates to the WSS and crashes
+      // the process before our friendly error can print.
+      const onListenError = (err) => {
+        this.httpServer.removeListener('listening', onListening);
         if (err.code === 'EADDRINUSE') {
           console.error('');
           console.error(`✗ 端口 ${this.port} 已被占用。`);
           console.error('  排查办法：');
-          console.error(`    PowerShell:  Get-NetTCPConnection -LocalPort ${this.port} | Select-Object OwningProcess`);
-          console.error(`    然后:        Stop-Process -Id <PID>`);
-          console.error('  或换端口：set $env:API_OVERRIDE_PORT=9877; node index.js');
+          console.error(`    PowerShell:  Get-NetTCPConnection -LocalPort ${this.port} -State Listen | Select-Object OwningProcess`);
+          console.error(`    然后:        Stop-Process -Id <PID> -Force`);
+          console.error('  或换端口：$env:API_OVERRIDE_PORT=9877; node index.js');
           console.error('');
         } else {
           console.error(`✗ bridge 启动失败: ${err.message}`);
         }
         reject(err);
-      });
+      };
 
-      this.httpServer.listen(this.port, this.host, () => {
+      const onListening = () => {
+        this.httpServer.removeListener('error', onListenError);
+
+        // Now that we're listening, safe to wire up the WebSocketServer.
+        this.wss = new WebSocketServer({ server: this.httpServer });
+        this.wss.on('error', (e) => this.log('wss error:', e.message));
+        this.wss.on('connection', (ws) => {
+          // Replace any prior client (extension reload, etc.)
+          if (this.client && this.client.readyState === this.client.OPEN) {
+            try { this.client.close(); } catch {}
+          }
+          this.client = ws;
+          this.log('✓ extension connected');
+          if (this._noExtensionWarn) {
+            clearTimeout(this._noExtensionWarn);
+            this._noExtensionWarn = null;
+          }
+          ws.on('message', (data) => this._onMessage(data));
+          ws.on('close', () => {
+            if (this.client === ws) this.client = null;
+            this.log('extension disconnected');
+          });
+          ws.on('error', (e) => this.log('ws error:', e.message));
+        });
+
         this.log(`bridge listening on http://${this.host}:${this.port}`);
         this.log(`  MCP   : /mcp   (Streamable HTTP transport)`);
         this.log(`  REST  : /call  (POST {method, params})`);
@@ -83,7 +92,11 @@ export class ExtensionBridge {
         }, 30000);
 
         resolve();
-      });
+      };
+
+      this.httpServer.once('error', onListenError);
+      this.httpServer.once('listening', onListening);
+      this.httpServer.listen(this.port, this.host);
     });
   }
 
