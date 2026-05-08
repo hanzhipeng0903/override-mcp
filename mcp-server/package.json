@@ -1,0 +1,22 @@
+{
+  "name": "api-override-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server that drives the API Override browser extension via a WebSocket bridge.",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "api-override-mcp": "index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "ws": "^8.18.0",
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.23.5"
+  }
+}

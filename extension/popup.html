@@ -1,0 +1,520 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>API Override</title>
+<style>
+  :root {
+    --fg: #101828;
+    --fg-soft: #344054;
+    --muted: #667085;
+    --line: #eaecf0;
+    --line-strong: #d0d5dd;
+    --bg: #ffffff;
+    --bg-soft: #f9fafb;
+    --bg-tag: #f2f4f7;
+    --primary: #155eef;
+    --primary-soft: #eff4ff;
+    --ok: #027a48;
+    --ok-bg: #ecfdf3;
+    --bad: #b42318;
+    --bad-bg: #fef3f2;
+    --warn: #b54708;
+    --warn-bg: #fffaeb;
+    --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+    --shadow-md: 0 4px 12px rgba(16, 24, 40, 0.08);
+    --radius: 6px;
+    --radius-lg: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font: 12.5px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+    width: 480px; color: var(--fg); background: var(--bg);
+  }
+  ::selection { background: var(--primary-soft); color: var(--primary); }
+
+  /* ───── full-page mode ───── */
+  body.fullpage {
+    width: 100%;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 24px 28px 60px;
+    background: var(--bg-soft);
+  }
+  body.fullpage .card {
+    background: var(--bg);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--line);
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  body.fullpage header,
+  body.fullpage nav,
+  body.fullpage section { padding-left: 18px; padding-right: 18px; }
+  body.fullpage section { max-height: none; padding-top: 16px; padding-bottom: 18px; }
+  body.fullpage h2 { font-size: 18px; }
+  body.fullpage #open-tab { display: none; }
+  body.fullpage .req .url { font-size: 12.5px; }
+  body.fullpage .rule { padding: 12px; }
+
+  /* ───── header ───── */
+  header {
+    padding: 12px 14px 10px;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg);
+  }
+  header .row {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  }
+  header .right { display: flex; align-items: center; gap: 6px; }
+  h2 {
+    margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
+    color: var(--fg);
+  }
+  .stats {
+    color: var(--muted); font-size: 11px; margin-top: 6px;
+    display: flex; gap: 12px; flex-wrap: wrap;
+  }
+  .stats span b { color: var(--fg-soft); font-weight: 600; }
+
+  /* ───── pills & chips ───── */
+  .pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 500;
+    line-height: 1.4;
+  }
+  .pill.ok  { background: var(--ok-bg);  color: var(--ok);  }
+  .pill.bad { background: var(--bad-bg); color: var(--bad); }
+  .pill::before {
+    content: ""; width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor; opacity: 0.7;
+  }
+
+  /* ───── nav tabs ───── */
+  nav {
+    display: flex; padding: 0 4px; gap: 2px;
+    border-bottom: 1px solid var(--line); background: var(--bg);
+  }
+  nav button {
+    padding: 9px 12px; border: none; background: transparent; cursor: pointer;
+    font: inherit; font-size: 12px; color: var(--muted);
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+    transition: color .15s, border-color .15s;
+  }
+  nav button:hover { color: var(--fg-soft); }
+  nav button.active { color: var(--primary); border-color: var(--primary); font-weight: 500; }
+  nav .badge {
+    display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px;
+    background: var(--bg-tag); color: var(--muted); border-radius: 999px;
+    font-size: 10px; font-weight: 600; text-align: center;
+  }
+  nav button.active .badge { background: var(--primary-soft); color: var(--primary); }
+
+  /* ───── sections ───── */
+  section {
+    padding: 10px 14px 14px; max-height: 380px; overflow-y: auto;
+    background: var(--bg);
+  }
+  section::-webkit-scrollbar { width: 8px; }
+  section::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; }
+
+  .row-actions {
+    display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+    margin-bottom: 10px;
+  }
+  .row-actions .grow { flex: 1; min-width: 0; }
+
+  .empty {
+    color: var(--muted); padding: 24px 12px; text-align: center;
+    border: 1px dashed var(--line-strong); border-radius: var(--radius);
+    background: var(--bg-soft); font-size: 11.5px; line-height: 1.6;
+  }
+  .empty b { color: var(--fg-soft); }
+
+  /* ───── buttons ───── */
+  .btn {
+    padding: 5px 11px; border-radius: var(--radius); border: 1px solid var(--line-strong);
+    background: var(--bg); cursor: pointer; font: inherit; font-size: 12px;
+    color: var(--fg-soft); transition: background .12s, border-color .12s, color .12s;
+    line-height: 1.3;
+  }
+  .btn:hover { background: var(--bg-soft); border-color: var(--muted); color: var(--fg); }
+  .btn:active { background: var(--bg-tag); }
+  .btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .btn.primary:hover { filter: brightness(1.08); background: var(--primary); color: #fff; }
+  .btn.danger { color: var(--bad); }
+  .btn.danger:hover { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn:disabled:hover { background: var(--bg); border-color: var(--line-strong); color: var(--fg-soft); }
+
+  .iconbtn {
+    width: 26px; height: 26px; padding: 0;
+    border: 1px solid var(--line-strong); border-radius: var(--radius);
+    background: var(--bg); cursor: pointer; color: var(--muted);
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background .12s, border-color .12s, color .12s;
+  }
+  .iconbtn:hover { background: var(--bg-soft); border-color: var(--muted); color: var(--fg-soft); }
+  .iconbtn svg { display: block; }
+
+  .chip {
+    padding: 3px 9px; font-size: 11px; border-radius: 999px;
+    color: var(--fg-soft);
+  }
+  .chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .chip.active:hover { background: var(--primary); color: #fff; filter: brightness(1.08); }
+
+  /* ───── recent request list ───── */
+  .req {
+    display: grid; grid-template-columns: 38px 38px 1fr auto auto;
+    gap: 8px; align-items: center; padding: 7px 4px;
+    border-bottom: 1px solid var(--line); transition: background .1s;
+  }
+  .req:hover { background: var(--bg-soft); }
+  .req:last-child { border-bottom: none; }
+  .req .method {
+    font-weight: 600; font-size: 10px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.02em;
+  }
+  .req .status {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 11px; font-weight: 500;
+  }
+  .req .status.s2 { color: var(--ok); }
+  .req .status.s3 { color: var(--warn); }
+  .req .status.s4, .req .status.s5 { color: var(--bad); }
+  .req .url {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 11.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--fg-soft);
+  }
+  .type-tag {
+    display: inline-block; font-size: 9px; padding: 1px 5px; margin-right: 5px;
+    background: var(--bg-tag); color: var(--muted); border-radius: 3px;
+    font-family: -apple-system, sans-serif; font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.02em;
+  }
+  .ovr {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    background: var(--warn-bg); color: var(--warn);
+    font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+  }
+
+  /* ───── rules list ───── */
+  .rule {
+    border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 10px; margin-bottom: 8px; background: var(--bg);
+    transition: border-color .12s;
+  }
+  .rule:hover { border-color: var(--line-strong); }
+  .rule.disabled { opacity: 0.55; background: var(--bg-soft); }
+  .rule .head { display: flex; align-items: center; gap: 8px; }
+  .rule .head .pat {
+    flex: 1; font-family: ui-monospace, monospace; font-size: 11.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--fg);
+  }
+  .rule .head .method-tag {
+    font-size: 10px; font-weight: 600; padding: 1px 6px;
+    background: var(--bg-tag); color: var(--fg-soft); border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.02em;
+  }
+  .rule .meta {
+    font-size: 11px; color: var(--muted); margin-top: 6px;
+    display: flex; gap: 10px; flex-wrap: wrap;
+  }
+  .rule .meta b { color: var(--fg-soft); font-weight: 600; }
+  .rule .note { font-style: italic; }
+
+  /* simple checkbox-style switch */
+  input[type="checkbox"] {
+    width: 14px; height: 14px; margin: 0; cursor: pointer;
+    accent-color: var(--primary);
+  }
+
+  /* ───── search box ───── */
+  .search-box {
+    position: relative; display: flex; align-items: center;
+  }
+  .search-box input {
+    flex: 1; padding: 6px 28px 6px 30px;
+    border: 1px solid var(--line-strong); border-radius: var(--radius);
+    font: inherit; font-size: 12px; color: var(--fg); width: 100%;
+    background: var(--bg) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23667085' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><path d='m21 21-4.3-4.3'/></svg>") no-repeat 9px center;
+    transition: border-color .12s, box-shadow .12s;
+  }
+  .search-box input:focus {
+    outline: none; border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-soft);
+  }
+  .search-box .search-clear {
+    position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+    width: 22px; height: 22px; border-radius: 50%;
+    border: none; background: transparent; color: var(--muted);
+    cursor: pointer; font-size: 16px; line-height: 1;
+    display: none; align-items: center; justify-content: center;
+    padding: 0;
+  }
+  .search-box .search-clear:hover { background: var(--bg-tag); color: var(--fg-soft); }
+  .search-box.has-value .search-clear { display: flex; }
+
+  /* ───── settings ───── */
+  .form-row {
+    display: flex; gap: 6px; margin-bottom: 10px; align-items: center;
+  }
+  .form-row input[type="text"] {
+    flex: 1; padding: 6px 9px; border: 1px solid var(--line-strong);
+    border-radius: var(--radius); font: inherit; font-size: 12px; color: var(--fg);
+    transition: border-color .12s, box-shadow .12s;
+  }
+  .form-row input[type="text"]:focus {
+    outline: none; border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-soft);
+  }
+  .host-item {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    background: var(--bg-soft); border-radius: var(--radius);
+    margin-bottom: 4px;
+    font-family: ui-monospace, monospace; font-size: 11.5px;
+  }
+  .host-item .glyph { color: var(--ok); font-size: 14px; }
+  .help-text {
+    color: var(--muted); font-size: 10.5px; margin-top: 12px; line-height: 1.6;
+  }
+  .help-text code {
+    background: var(--bg-tag); padding: 1px 5px; border-radius: 3px;
+    font-size: 10.5px;
+  }
+
+  /* ───── editor modal ───── */
+  #editor {
+    display: none; position: fixed; inset: 0; background: rgba(16, 24, 40, 0.5);
+    z-index: 100; align-items: center; justify-content: center; padding: 16px;
+    backdrop-filter: blur(2px);
+  }
+  #editor.open { display: flex; }
+  #editor .panel {
+    background: var(--bg); width: 100%; max-width: 520px; border-radius: var(--radius-lg);
+    padding: 18px; box-shadow: var(--shadow-md);
+  }
+  #editor h3 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+  #editor .target {
+    color: var(--muted); font-size: 11px; word-break: break-all; margin-bottom: 10px;
+    font-family: ui-monospace, monospace;
+  }
+  #editor textarea {
+    width: 100%; height: 240px; padding: 10px;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 11.5px; line-height: 1.55;
+    border: 1px solid var(--line-strong); border-radius: var(--radius);
+    resize: vertical; color: var(--fg); background: var(--bg-soft);
+  }
+  #editor textarea:focus {
+    outline: none; border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-soft); background: var(--bg);
+  }
+  #editor .editor-row {
+    display: flex; gap: 10px; align-items: center; margin: 10px 0 0;
+    font-size: 11.5px;
+  }
+  #editor input[type="number"] {
+    width: 70px; padding: 4px 8px; border: 1px solid var(--line-strong);
+    border-radius: var(--radius); font: inherit;
+  }
+  #editor .footer {
+    display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px;
+  }
+
+  /* ───── rule detail modal ───── */
+  #detail {
+    display: none; position: fixed; inset: 0; background: rgba(16, 24, 40, 0.5);
+    z-index: 100; align-items: center; justify-content: center; padding: 16px;
+    backdrop-filter: blur(2px);
+  }
+  #detail.open { display: flex; }
+  #detail .panel {
+    background: var(--bg); width: 100%; max-width: 560px; border-radius: var(--radius-lg);
+    padding: 18px; box-shadow: var(--shadow-md); max-height: 85vh; display: flex; flex-direction: column;
+  }
+  #detail h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+  #detail .scroll { overflow-y: auto; flex: 1; }
+  #detail .kv {
+    display: grid; grid-template-columns: 96px 1fr; gap: 10px;
+    padding: 6px 0; align-items: start; border-bottom: 1px solid var(--line);
+  }
+  #detail .kv:last-child { border-bottom: none; }
+  #detail .kv .k {
+    font-size: 11px; color: var(--muted); padding-top: 3px; line-height: 1.4;
+  }
+  #detail .kv .v {
+    font-size: 12px; color: var(--fg); min-width: 0;
+    word-break: break-all; line-height: 1.5;
+  }
+  #detail .kv code {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 11.5px;
+    background: var(--bg-tag); padding: 2px 7px; border-radius: 4px;
+  }
+  #detail .kv pre {
+    margin: 0; padding: 10px;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 11px;
+    background: var(--bg-soft); border: 1px solid var(--line);
+    border-radius: var(--radius); max-height: 280px; overflow: auto;
+    white-space: pre-wrap; line-height: 1.55;
+  }
+  #detail .badge-action {
+    display: inline-block; padding: 1px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 600;
+  }
+  #detail .badge-action.fulfill { background: var(--ok-bg); color: var(--ok); }
+  #detail .badge-action.passthrough_patch { background: var(--primary-soft); color: var(--primary); }
+  #detail .badge-action.block { background: var(--bad-bg); color: var(--bad); }
+  #detail .footer {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line);
+  }
+  #detail .muted-tiny {
+    font-size: 10px; color: var(--muted); font-family: ui-monospace, monospace;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <div class="row">
+      <h2>API Override</h2>
+      <div class="right">
+        <span id="bridge" class="pill bad">disconnected</span>
+        <button id="toggle" class="btn" title="全局 override 总开关">on</button>
+        <button id="open-tab" class="iconbtn" title="在标签页打开" aria-label="在标签页打开">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 3h7v7"/>
+            <path d="M10 14L21 3"/>
+            <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div class="stats" id="stats"><span>—</span></div>
+  </header>
+
+  <nav>
+    <button data-tab="recent" class="active">最近请求 <span class="badge" id="badge-recent">0</span></button>
+    <button data-tab="rules">规则 <span class="badge" id="badge-rules">0</span></button>
+    <button data-tab="settings">设置</button>
+  </nav>
+
+  <!-- Recent tab -->
+  <section id="tab-recent">
+    <div class="row-actions">
+      <span id="active-info" class="grow" style="font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+      <button id="attach-btn" class="btn primary">Attach</button>
+      <button id="detach-btn" class="btn">Detach</button>
+    </div>
+    <div class="row-actions" id="type-filter" style="margin-bottom:6px;gap:5px">
+      <span style="color:var(--muted);font-size:11px;margin-right:2px">类型</span>
+      <button class="btn chip" data-type="api">API</button>
+      <button class="btn chip" data-type="Document">Doc</button>
+      <button class="btn chip" data-type="Script">JS</button>
+      <button class="btn chip" data-type="Stylesheet">CSS</button>
+      <button class="btn chip" data-type="Image">Img</button>
+      <button class="btn chip" data-type="all">全部</button>
+    </div>
+    <div class="search-box" style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--line)">
+      <input type="text" id="recent-search" placeholder="按 URL 或方法搜索…" />
+      <button class="search-clear" id="recent-search-clear" type="button" title="清空">×</button>
+    </div>
+    <div id="recent-list">
+      <div class="empty">未 attach 任何 tab，点上面 <b>Attach</b> 开始抓包</div>
+    </div>
+  </section>
+
+  <!-- Rules tab -->
+  <section id="tab-rules" style="display:none">
+    <div class="row-actions">
+      <span class="grow"></span>
+      <button id="clear-rules-btn" class="btn danger">清空全部</button>
+    </div>
+    <div class="search-box" style="margin-bottom:10px">
+      <input type="text" id="rules-search" placeholder="按 URL / 方法 / 备注搜索…" />
+      <button class="search-clear" id="rules-search-clear" type="button" title="清空">×</button>
+    </div>
+    <div id="rules-list">
+      <div class="empty">还没有规则<br>在"<b>最近请求</b>"里点 <b>Mock</b> 创建</div>
+    </div>
+  </section>
+
+  <!-- Settings tab -->
+  <section id="tab-settings" style="display:none">
+    <div style="font-weight:600;margin-bottom:8px;color:var(--fg-soft)">桥接服务地址</div>
+    <div class="form-row">
+      <input type="text" id="bridge-host" placeholder="localhost" style="flex:0 0 140px" />
+      <input type="text" id="bridge-port" placeholder="9876" style="flex:0 0 80px" />
+      <button id="bridge-save" class="btn primary">保存并重连</button>
+    </div>
+    <div class="help-text" style="margin-top:0;margin-bottom:18px">
+      默认 <code>localhost:9876</code>。改了之后扩展会立即用新地址重连 mcp-server。
+      要让 server 用同样的端口，启动时传 <code>API_OVERRIDE_PORT=端口号</code> 环境变量。
+    </div>
+
+    <div style="font-weight:600;margin-bottom:8px;color:var(--fg-soft);padding-top:14px;border-top:1px solid var(--line)">自动 attach（host 白名单）</div>
+    <div class="row-actions">
+      <label style="flex:1;display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="auto-enabled" />
+        <span>启用 host 白名单自动 attach</span>
+      </label>
+    </div>
+    <div class="form-row">
+      <input type="text" id="new-host" placeholder="example.com 或 *.example.com" />
+      <button id="add-host" class="btn primary">添加</button>
+    </div>
+    <div id="hosts-list">
+      <div class="empty">未添加任何 host<br>匹配的 tab 打开时会自动 attach（无需手动点）</div>
+    </div>
+    <div class="help-text">
+      模式支持 <code>*</code>（任意字符）和 <code>?</code>（单字符），按 hostname 匹配。
+      例：<code>*.foo.com</code> 匹配 <code>a.foo.com</code> 但不匹配 <code>foo.com</code>。
+    </div>
+  </section>
+
+  <!-- Body editor modal -->
+  <div id="editor">
+    <div class="panel">
+      <h3>Mock 这个接口的响应</h3>
+      <div class="target" id="editor-target">—</div>
+      <textarea id="editor-body" spellcheck="false"></textarea>
+      <div class="editor-row">
+        <label>状态码</label>
+        <input type="number" id="editor-status" value="200" min="100" max="599" />
+        <span style="flex:1"></span>
+        <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:5px;cursor:pointer">
+          <input type="checkbox" id="editor-pretty" checked />
+          自动格式化 JSON
+        </label>
+      </div>
+      <div class="footer">
+        <button id="editor-cancel" class="btn">取消</button>
+        <button id="editor-save" class="btn primary">保存为规则</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rule detail modal -->
+  <div id="detail">
+    <div class="panel">
+      <h3>规则详情</h3>
+      <div class="scroll" id="detail-body"></div>
+      <div class="footer">
+        <button id="detail-delete" class="btn danger">删除规则</button>
+        <div style="display:flex;gap:6px">
+          <button id="detail-edit" class="btn primary">编辑 body</button>
+          <button id="detail-close" class="btn">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

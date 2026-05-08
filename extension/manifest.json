@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "API Override (MCP)",
+  "version": "0.1.0",
+  "description": "Intercept and override API responses (incl. 404s/network failures), controlled by an MCP server.",
+  "permissions": ["debugger", "storage", "tabs", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "API Override"
+  }
+}
