@@ -5,16 +5,18 @@
 #   irm https://raw.githubusercontent.com/hanzhipeng0903/override-mcp/main/bootstrap.ps1 | iex
 #
 # 这个脚本会：
-#   1) 把仓库下到 %LOCALAPPDATA%\override-mcp（有 git 用 git clone，没有就下 zip）
-#   2) 调用仓库里的 install.ps1（依赖安装、Claude Code 配置、自启动、立即启动）
-#   3) 提示用户去 chrome://extensions 加载扩展
+#   1) 从 GitHub Releases 下载最新打包好的 zip（已 bundle + 混淆，不含源码）
+#   2) 解压到 %LOCALAPPDATA%\override-mcp
+#   3) 调用 install.ps1（写 Claude Code 配置 + 注册自启 + 启动）
+#   4) 引导用户加载扩展（剪贴板复制路径 + 打开 chrome://extensions）
 #
-# 可重复运行：已经装过会自动 git pull 更新到最新版。
+# 可重复运行：再次跑会下最新 release 覆盖安装。
 # ============================================================
 
 param(
     [string]$Repo = 'hanzhipeng0903/override-mcp',
-    [string]$Branch = 'main',
+    [string]$Tag = 'latest',
+    [string]$AssetName = 'override-mcp-release.zip',
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'override-mcp'),
     [int]$Port = 9876,
     [switch]$NoAutostart,
@@ -23,142 +25,116 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-function Write-Step([string]$msg) {
-    Write-Host ""
-    Write-Host "==> $msg" -ForegroundColor Cyan
-}
+function Write-Step([string]$msg) { Write-Host ""; Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Ok([string]$msg)   { Write-Host "    [OK] $msg" -ForegroundColor Green }
 function Write-Warn2([string]$msg) { Write-Host "    [!] $msg" -ForegroundColor Yellow }
 function Write-Err2([string]$msg)  { Write-Host "    [X] $msg" -ForegroundColor Red }
 
 Write-Host ""
 Write-Host "=========================================================" -ForegroundColor Cyan
-Write-Host " API Override MCP - 在线安装器" -ForegroundColor Cyan
+Write-Host " API Override MCP - 在线安装器 (Release 版)" -ForegroundColor Cyan
 Write-Host "=========================================================" -ForegroundColor Cyan
-Write-Host " 仓库:   $Repo (branch: $Branch)"
+Write-Host " 仓库:   $Repo"
+Write-Host " Tag:    $Tag"
 Write-Host " 装到:   $InstallDir"
 Write-Host " 端口:   $Port"
 Write-Host "=========================================================" -ForegroundColor Cyan
 
 # ------------------------------------------------------------
-# 1. 拉代码：优先 git clone，没 git 就走 zip 下载
+# 1. 下载 Release zip
 # ------------------------------------------------------------
-Write-Step "下载源代码"
+Write-Step "下载发行包"
 
-$hasGit = $false
-try { & git --version *>$null; if ($LASTEXITCODE -eq 0) { $hasGit = $true } } catch {}
-
-if ($hasGit) {
-    # IMPORTANT: do NOT use "2>&1" with native exes on Windows PowerShell 5.1.
-    # Git writes progress messages ("Cloning into...") to stderr; with 2>&1 PS5.1
-    # wraps each line as a NativeCommandError, which $ErrorActionPreference='Stop'
-    # promotes to a terminating error — even though git itself succeeded.
-    # Strategy: temporarily relax EAP, run native command, check $LASTEXITCODE.
-    $savedEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        if (Test-Path (Join-Path $InstallDir '.git')) {
-            Write-Host "    已存在 git 仓库，执行 git pull 更新..."
-            Push-Location $InstallDir
-            try {
-                & git fetch origin $Branch | Out-Null
-                if ($LASTEXITCODE -ne 0) { Write-Err2 "git fetch 失败"; exit 1 }
-                & git reset --hard "origin/$Branch" | Out-Null
-                if ($LASTEXITCODE -ne 0) { Write-Err2 "git reset 失败"; exit 1 }
-                Write-Ok "已更新到最新 $Branch"
-            } finally {
-                Pop-Location
-            }
-        } else {
-            if (Test-Path $InstallDir) {
-                Write-Warn2 "目录 $InstallDir 已存在但不是 git 仓库，备份后重新克隆"
-                $backupName = "$InstallDir.bak.$(Get-Date -Format 'yyyyMMddHHmmss')"
-                Rename-Item -Path $InstallDir -NewName $backupName
-                Write-Host "    旧目录 → $backupName"
-            }
-            Write-Host "    git clone https://github.com/$Repo.git ..."
-            & git clone --depth 1 --branch $Branch "https://github.com/$Repo.git" $InstallDir
-            if ($LASTEXITCODE -ne 0) { Write-Err2 "git clone 失败 (exit $LASTEXITCODE)"; exit 1 }
-            Write-Ok "已 clone 到 $InstallDir"
-        }
-    } finally {
-        $ErrorActionPreference = $savedEAP
-    }
+# 解析下载 URL（latest 用 GitHub 的 latest 端点；指定 tag 用 download URL）
+if ($Tag -eq 'latest') {
+    $downloadUrl = "https://github.com/$Repo/releases/latest/download/$AssetName"
 } else {
-    Write-Warn2 "未检测到 git，改用 zip 下载（无法增量更新）"
-    $zipUrl = "https://codeload.github.com/$Repo/zip/refs/heads/$Branch"
-    $tmpZip = Join-Path $env:TEMP "override-mcp-$Branch.zip"
-    $tmpExtract = Join-Path $env:TEMP "override-mcp-extract-$([guid]::NewGuid())"
-
-    if (Test-Path $InstallDir) {
-        $backupName = "$InstallDir.bak.$(Get-Date -Format 'yyyyMMddHHmmss')"
-        Rename-Item -Path $InstallDir -NewName $backupName
-        Write-Host "    旧目录已备份 → $backupName"
-    }
-
-    Write-Host "    下载 $zipUrl ..."
-    Invoke-WebRequest -Uri $zipUrl -OutFile $tmpZip -UseBasicParsing
-    Write-Host "    解压..."
-    Expand-Archive -Path $tmpZip -DestinationPath $tmpExtract -Force
-    # zip 解出的根目录会带 -<branch> 后缀，移到目标位置
-    $inner = Get-ChildItem $tmpExtract | Select-Object -First 1
-    Move-Item -Path $inner.FullName -Destination $InstallDir
-    Remove-Item $tmpZip -Force -ErrorAction SilentlyContinue
-    Remove-Item $tmpExtract -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Ok "已解压到 $InstallDir"
+    $downloadUrl = "https://github.com/$Repo/releases/download/$Tag/$AssetName"
 }
 
-# ------------------------------------------------------------
-# 2. 跑仓库自带的 install.ps1
-# ------------------------------------------------------------
-$installScript = Join-Path $InstallDir 'install.ps1'
-if (-not (Test-Path $installScript)) {
-    Write-Err2 "找不到 install.ps1（路径：$installScript）。仓库结构异常。"
+$tmpZip = Join-Path $env:TEMP "override-mcp-release-$([guid]::NewGuid()).zip"
+$tmpExtract = Join-Path $env:TEMP "override-mcp-extract-$([guid]::NewGuid())"
+
+Write-Host "    URL: $downloadUrl"
+try {
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpZip -UseBasicParsing
+} catch {
+    Write-Err2 "下载失败：$($_.Exception.Message)"
+    Write-Host "    可能原因：仓库还没有 Release / 网络问题 / 资源名不对"
+    Write-Host "    检查：https://github.com/$Repo/releases"
     exit 1
 }
 
+$zipSize = (Get-Item $tmpZip).Length
+Write-Ok "已下载 ($([math]::Round($zipSize/1KB, 1)) KB)"
+
+# ------------------------------------------------------------
+# 2. 解压到目标目录（先备份旧目录）
+# ------------------------------------------------------------
+Write-Step "解压安装"
+
+# 先停掉可能在跑的旧 server，避免文件锁
+try {
+    $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    if ($conns) {
+        $pids = $conns | Select-Object -ExpandProperty OwningProcess -Unique
+        foreach ($oldPid in $pids) {
+            $proc = Get-Process -Id $oldPid -ErrorAction SilentlyContinue
+            if ($proc -and $proc.ProcessName -eq 'node') {
+                Write-Host "    停掉旧 server (PID $oldPid)"
+                Stop-Process -Id $oldPid -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Milliseconds 500
+            }
+        }
+    }
+} catch { }
+
+# 备份旧安装目录
+if (Test-Path $InstallDir) {
+    $backupName = "$InstallDir.bak.$(Get-Date -Format 'yyyyMMddHHmmss')"
+    try {
+        Move-Item -Path $InstallDir -Destination $backupName -Force
+        Write-Host "    旧目录 → $backupName"
+    } catch {
+        Write-Warn2 "无法备份旧目录（可能有进程占用），尝试直接覆盖"
+        Remove-Item $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# 解压
+Expand-Archive -Path $tmpZip -DestinationPath $InstallDir -Force
+Remove-Item $tmpZip -Force -ErrorAction SilentlyContinue
+if (Test-Path $tmpExtract) { Remove-Item $tmpExtract -Recurse -Force -ErrorAction SilentlyContinue }
+Write-Ok "已解压到 $InstallDir"
+
+# ------------------------------------------------------------
+# 3. 跑发行包里的 install.ps1
+# ------------------------------------------------------------
+$installScript = Join-Path $InstallDir 'install.ps1'
+if (-not (Test-Path $installScript)) {
+    Write-Err2 "找不到 install.ps1（路径：$installScript）。zip 结构异常。"
+    exit 1
+}
+
+Write-Step "执行 install.ps1"
 $installArgs = @('-Port', $Port)
 if ($NoAutostart) { $installArgs += '-NoAutostart' }
 if ($NoStart)     { $installArgs += '-NoStart' }
 
-Write-Step "执行 install.ps1"
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installScript @args
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installScript @installArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Err2 "install.ps1 失败 (exit $LASTEXITCODE)"
     exit $LASTEXITCODE
 }
 
 # ------------------------------------------------------------
-# 3. 引导加载扩展
+# 完成（install.ps1 自身已打印加载扩展指引）
 # ------------------------------------------------------------
-$extPath = Join-Path $InstallDir 'extension'
-
 Write-Host ""
 Write-Host "=========================================================" -ForegroundColor Green
-Write-Host " 安装完成 - 还差最后一步：加载浏览器扩展" -ForegroundColor Green
+Write-Host " 全部完成" -ForegroundColor Green
 Write-Host "=========================================================" -ForegroundColor Green
 Write-Host ""
-Write-Host " 1. Chrome 打开:   chrome://extensions"
-Write-Host " 2. 右上角开:      [开发者模式]"
-Write-Host " 3. 点:            [加载已解压的扩展程序]"
-Write-Host " 4. 选目录:" -NoNewline; Write-Host " $extPath" -ForegroundColor Yellow
+Write-Host " 卸载: powershell -ExecutionPolicy Bypass -File `"$InstallDir\uninstall.ps1`""
+Write-Host " 更新: 重新跑 irm | iex 即可"
 Write-Host ""
-Write-Host " 装完后:"
-Write-Host "   - 扩展 popup 顶部 pill 显示绿色 connected 即握手成功"
-Write-Host "   - 重启 Claude Code，即可让 AI 直接对网页 mock 接口"
-Write-Host ""
-Write-Host " 卸载:"
-Write-Host "   powershell -ExecutionPolicy Bypass -File `"$InstallDir\uninstall.ps1`""
-Write-Host ""
-
-# 自动把 extension 路径复制到剪贴板，方便用户粘贴
-try {
-    $extPath | Set-Clipboard
-    Write-Host " （扩展目录路径已自动复制到剪贴板）" -ForegroundColor DarkGray
-    Write-Host ""
-} catch {}
-
-# 自动打开 chrome://extensions（best-effort）
-try {
-    Start-Process 'chrome' -ArgumentList 'chrome://extensions' -ErrorAction SilentlyContinue
-} catch {}
