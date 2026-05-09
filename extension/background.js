@@ -357,10 +357,13 @@ async function detachTab(tabId) {
 }
 
 // Configure CDP Fetch stages based on rules in play.
-// - If there are passthrough_patch rules: enable both Request + Response stages.
+// - Response-stage actions (passthrough_patch / passthrough_text_patch) need Response stage.
 // - Otherwise: just Request stage (cheaper).
 async function reconfigureFetch(tabId) {
-  const needsResponseStage = state.rules.some(r => r.enabled !== false && r.action?.type === 'passthrough_patch');
+  const needsResponseStage = state.rules.some(r =>
+    r.enabled !== false &&
+    (r.action?.type === 'passthrough_patch' || r.action?.type === 'passthrough_text_patch')
+  );
   const patterns = [{ urlPattern: '*', requestStage: 'Request' }];
   if (needsResponseStage) patterns.push({ urlPattern: '*', requestStage: 'Response' });
   await chrome.debugger.sendCommand({ tabId }, 'Fetch.enable', { patterns });
@@ -550,6 +553,32 @@ async function onRequestPaused(source, p) {
     return;
   }
 
+  // ---- redirect: rewrite the URL before the network request goes out ----
+  if (action.type === 'redirect') {
+    if (isResponseStage) return continueThrough(source, requestId, true, responseHeaders);
+    let newUrl = request.url;
+    if (action.rewrite && action.rewrite.from != null && action.rewrite.to != null) {
+      newUrl = newUrl.split(action.rewrite.from).join(action.rewrite.to);
+    } else if (action.url) {
+      newUrl = action.url;
+    }
+    if (newUrl === request.url) {
+      return continueThrough(source, requestId, false);
+    }
+    await chrome.debugger.sendCommand(source, 'Fetch.continueRequest', {
+      requestId,
+      url: newUrl
+    });
+    bumpHit(rule);
+    markOverridden(networkId, {
+      status: null,
+      body: `[redirected → ${newUrl}]`,
+      ruleId: rule.id,
+      kind: 'redirect'
+    });
+    return;
+  }
+
   // ---- block: simulate network failure ----
   if (action.type === 'block') {
     if (isResponseStage) return continueThrough(source, requestId, true, responseHeaders);
@@ -599,6 +628,60 @@ async function onRequestPaused(source, p) {
       originalBody: text,
       ruleId: rule.id,
       kind: 'passthrough_patch'
+    });
+    return;
+  }
+
+  // ---- passthrough_text_patch: hit network, then string/regex-replace the body ----
+  // Works for any text response (HTML, JS, CSS, plaintext) — does NOT require JSON.
+  if (action.type === 'passthrough_text_patch') {
+    if (!isResponseStage) {
+      return chrome.debugger.sendCommand(source, 'Fetch.continueRequest', { requestId });
+    }
+    let raw;
+    try {
+      raw = await chrome.debugger.sendCommand(source, 'Fetch.getResponseBody', { requestId });
+    } catch (e) {
+      log('getResponseBody failed; passing through', e);
+      return chrome.debugger.sendCommand(source, 'Fetch.continueResponse', { requestId });
+    }
+    const original = raw.base64Encoded ? safeAtob(raw.body) : raw.body;
+    let text = original;
+    if (Array.isArray(action.replace)) {
+      for (const op of action.replace) {
+        if (!op || op.from == null) continue;
+        const to = op.to != null ? op.to : '';
+        if (op.regex) {
+          try {
+            text = text.replace(new RegExp(op.from, op.flags || 'g'), to);
+          } catch (e) {
+            log('text_patch regex error; skipping op', e?.message);
+          }
+        } else {
+          text = text.split(op.from).join(to);
+        }
+      }
+    }
+    // Optionally drop response headers (e.g. Content-Security-Policy) so injected
+    // scripts can run. Compare case-insensitively.
+    let headers = responseHeaders || [];
+    if (Array.isArray(action.stripHeaders) && action.stripHeaders.length) {
+      const drop = new Set(action.stripHeaders.map(s => String(s).toLowerCase()));
+      headers = headers.filter(h => !drop.has(String(h.name).toLowerCase()));
+    }
+    await chrome.debugger.sendCommand(source, 'Fetch.fulfillRequest', {
+      requestId,
+      responseCode: action.status || responseStatusCode,
+      responseHeaders: headers,
+      body: encodeBodyBase64(text)
+    });
+    bumpHit(rule);
+    markOverridden(networkId, {
+      status: action.status || responseStatusCode,
+      body: text,
+      originalBody: original,
+      ruleId: rule.id,
+      kind: 'passthrough_text_patch'
     });
     return;
   }
@@ -758,9 +841,11 @@ function findMatchingRule(request, isResponseStage) {
     if (!r.enabled) continue;
     if (r.match.method !== '*' && r.match.method !== request.method.toUpperCase()) continue;
     if (!globMatch(request.url, r.match.url)) continue;
-    // At response stage we only care about passthrough_patch
-    if (isResponseStage && r.action?.type !== 'passthrough_patch') continue;
-    if (!isResponseStage && r.action?.type === 'passthrough_patch') continue;
+    // Response-stage actions only fire after the network response arrives;
+    // every other action (fulfill / block / redirect) runs at request stage.
+    const t = r.action?.type;
+    const isResponseStageType = (t === 'passthrough_patch' || t === 'passthrough_text_patch');
+    if (isResponseStage !== isResponseStageType) continue;
     return r;
   }
   return null;

@@ -32,7 +32,28 @@ const BlockAction = z.object({
   reason: z.string().default('Failed').describe('CDP error reason, e.g. Failed, Aborted, TimedOut, ConnectionRefused')
 });
 
-const RuleAction = z.union([FulfillAction, PassthroughPatchAction, BlockAction]);
+const RedirectAction = z.object({
+  type: z.literal('redirect'),
+  rewrite: z.object({
+    from: z.string().describe('Substring (or URL prefix) found in the original URL.'),
+    to: z.string().describe('Replacement substring. All occurrences are replaced.')
+  }).optional().describe('Prefix/substring rewrite. Mutually exclusive with `url`.'),
+  url: z.string().optional().describe('Replace the entire URL with this exact one. Mutually exclusive with `rewrite`.')
+});
+
+const PassthroughTextPatchAction = z.object({
+  type: z.literal('passthrough_text_patch'),
+  status: z.number().int().nullable().optional().describe('Override status code. Null/omit = keep original.'),
+  replace: z.array(z.object({
+    from: z.string().describe('Literal substring to find, or a regex source if `regex` is true.'),
+    to: z.string().default('').describe('Replacement string. Defaults to empty (delete).'),
+    regex: z.boolean().optional().default(false).describe('Treat `from` as a JavaScript regex source.'),
+    flags: z.string().optional().default('g').describe('Regex flags when `regex` is true. Default `g`.')
+  })).describe('Replacements applied IN ORDER to the response body text.'),
+  stripHeaders: z.array(z.string()).optional().describe('Headers to strip from the response (case-insensitive). Useful: ["content-security-policy", "content-security-policy-report-only"] when injecting <script> tags.')
+});
+
+const RuleAction = z.union([FulfillAction, PassthroughPatchAction, BlockAction, RedirectAction, PassthroughTextPatchAction]);
 
 const RuleInput = z.object({
   id: z.string().optional(),
@@ -137,15 +158,21 @@ export function buildTools(bridge) {
         'After this returns, the user just needs to refresh or trigger a new request to see the override fire.',
         '',
         'Action types:',
-        '  * `fulfill`        — return mock without hitting network (works even if real endpoint 404s or DNS fails)',
-        '  * `passthrough_patch` — let request through, then patch the JSON response (`merge` and/or `jsonPatch`)',
-        '  * `block`          — simulate a network error (failure reason is configurable)',
+        '  * `fulfill`                — return mock without hitting network (works even if real endpoint 404s or DNS fails)',
+        '  * `passthrough_patch`      — let JSON response through, then deep-merge / RFC6902-patch it',
+        '  * `passthrough_text_patch` — let response through, then string/regex-replace the body text (HTML/JS/CSS/etc.)',
+        '  * `redirect`               — rewrite the URL before the request goes out (e.g. point prod assets at a local dev server)',
+        '  * `block`                  — simulate a network error (failure reason is configurable)',
         '',
         'Examples:',
         '  Mock a 404 endpoint as 200 JSON:',
         '    { match: { url: "*api/v2/preferences*" }, action: { type: "fulfill", status: 200, body: "{\\"theme\\":\\"dark\\"}" } }',
         '  Force vip=true in user profile response:',
         '    { match: { url: "*api/me" }, action: { type: "passthrough_patch", merge: { vip: true } } }',
+        '  Inject a script into the HTML document (and strip CSP so it can run):',
+        '    { match: { url: "https://example.com/" }, action: { type: "passthrough_text_patch", replace: [{ from: "</head>", to: "<script src=\\"http://127.0.0.1:5173/inject.js\\"></script></head>" }], stripHeaders: ["content-security-policy"] } }',
+        '  Redirect prod assets to a local dev server:',
+        '    { match: { url: "https://prod.example.com/static/*" }, action: { type: "redirect", rewrite: { from: "https://prod.example.com/static/", to: "http://127.0.0.1:5173/src/" } } }',
         '  Simulate connection refused:',
         '    { match: { url: "*ads*" }, action: { type: "block", reason: "ConnectionRefused" } }'
       ].join('\n'),

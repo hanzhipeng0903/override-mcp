@@ -141,7 +141,7 @@ cd override-mcp
 {
   match: { url: '*api/users*', method: 'GET' },  // glob or /regex/
   action: {
-    type: 'fulfill',           // OR 'passthrough_patch' OR 'block'
+    type: 'fulfill',           // fulfill | passthrough_patch | passthrough_text_patch | redirect | block
     status: 200,
     headers: { 'content-type': 'application/json' },
     body: '{"id":1,"name":"mock"}'
@@ -151,7 +151,7 @@ cd override-mcp
 }
 ```
 
-`passthrough_patch` example (changes one field on the real response):
+`passthrough_patch` example (changes one field on the real JSON response):
 
 ```js
 {
@@ -163,6 +163,45 @@ cd override-mcp
   }
 }
 ```
+
+`passthrough_text_patch` example (string/regex replace on the real response body — works for HTML, JS, CSS, anything text):
+
+```js
+{
+  match: { url: 'https://example.com/' },
+  action: {
+    type: 'passthrough_text_patch',
+    replace: [
+      { from: '</head>', to: '<script src="http://127.0.0.1:5173/inject.js"></script></head>' },
+      // regex form:
+      { from: 'window\\.__FLAG__\\s*=\\s*false', to: 'window.__FLAG__ = true', regex: true }
+    ],
+    // strip CSP so injected scripts can actually run
+    stripHeaders: ['content-security-policy', 'content-security-policy-report-only']
+  }
+}
+```
+
+`redirect` example (point prod assets at a local dev server):
+
+```js
+{
+  match: { url: 'https://prod.example.com/static/*' },
+  action: {
+    type: 'redirect',
+    rewrite: {
+      from: 'https://prod.example.com/static/',
+      to:   'http://127.0.0.1:5173/src/'
+    }
+    // or replace the entire URL:
+    // url: 'http://127.0.0.1:5173/src/index.js'
+  }
+}
+```
+
+> ⚠ Cross-origin redirect targets need to serve the right CORS headers for `fetch`/XHR.
+> `<script src>` / `<link href>` / `<img>` etc. don't go through CORS unless the tag has `crossorigin`,
+> so most "prod → localhost dev server" rewrites for static assets work out of the box.
 
 `block` example (simulate network failures):
 
