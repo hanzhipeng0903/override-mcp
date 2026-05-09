@@ -308,8 +308,12 @@ Write-Host ""
   // uninstall.ps1 — same as source repo's
   const uninstallPs1Source = await readFile(resolve(ROOT, 'uninstall.ps1'), 'utf-8');
 
-  await writeFile(resolve(STAGE, 'install.ps1'), installPs1, 'utf-8');
-  await writeFile(resolve(STAGE, 'uninstall.ps1'), uninstallPs1Source, 'utf-8');
+  // Critical: BOTH .ps1 files must have UTF-8 BOM. Windows PowerShell 5.1 reads
+  // BOM-less .ps1 as the system ANSI code page (GBK on zh-CN), garbling Chinese
+  // strings into characters that fail to parse.
+  const withBom = (s) => s.startsWith('﻿') ? s : ('﻿' + s);
+  await writeFile(resolve(STAGE, 'install.ps1'), withBom(installPs1), 'utf-8');
+  await writeFile(resolve(STAGE, 'uninstall.ps1'), withBom(uninstallPs1Source), 'utf-8');
 
   // README for the release zip
   const readme = `﻿# API Override MCP（发行包）
